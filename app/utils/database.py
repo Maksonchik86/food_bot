@@ -1,18 +1,66 @@
 import sqlite3
 import os
-from config import DB_PATH # Используем тот же путь, что и в fresh_db.py
+from config import DB_PATH
 
 def get_db_connection():
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
-# --- ПОИСК ПРОДУКТОВ (подстроено под kcal, protein, fat, carbs) ---
+def init_db():
+    """Инициализация таблиц базы данных, если они отсутствуют"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    # Таблица пользователей
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        user_id INTEGER PRIMARY KEY,
+        age INTEGER,
+        weight REAL,
+        height REAL,
+        gender TEXT,
+        activity TEXT,
+        daily_norm REAL
+    )
+    """)
 
+    # Таблица логов (приемы пищи)
+    # Используем автоматическое заполнение даты и времени
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        kcal REAL,
+        protein REAL,
+        fat REAL,
+        carbs REAL,
+        details TEXT,
+        meal_name TEXT,
+        date TEXT DEFAULT (date('now', 'localtime')),
+        timestamp DATETIME DEFAULT (datetime('now', 'localtime'))
+    )
+    """)
+
+    # Таблица продуктов
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS foods (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        kcal REAL,
+        protein REAL,
+        fat REAL,
+        carbs REAL
+    )
+    """)
+    
+    conn.commit()
+    conn.close()
+
+# --- ПОИСК ПРОДУКТОВ ---
 def search_foods(query):
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Гибкий поиск по подстроке
     cursor.execute("""
         SELECT id, name, kcal, protein, fat, carbs FROM foods 
         WHERE LOWER(name) LIKE ? 
@@ -32,7 +80,6 @@ def get_food_by_id(food_id: int):
     return result
 
 # --- ПОЛЬЗОВАТЕЛИ ---
-
 def upsert_user_profile(user_id, gender, age, height, weight, activity_text, daily_norm):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -53,7 +100,6 @@ def get_user_profile(user_id):
     return user
 
 # --- ЛОГИ (ПРИЕМЫ ПИЩИ) ---
-
 def log_meal(user_id, kcal, p, f, c, details, meal_name="Прием пищи"):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -81,7 +127,6 @@ def get_daily_logs(user_id):
 def get_daily_stats(user_id):
     conn = get_db_connection()
     cur = conn.cursor()
-    # Проверь, что здесь protein, fat, carbs (как в твоем fresh_db)
     cur.execute("""
         SELECT SUM(kcal) as total_kcal, 
                SUM(protein) as total_prot, 

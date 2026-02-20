@@ -16,6 +16,8 @@ from aiogram.types import BotCommand
 # Импортируем твои модули
 from app.handlers import register_handlers
 from app.utils.scheduler import setup_scheduler
+# Импортируем функцию инициализации базы данных
+from app.utils.database import init_db
 
 # Настройка логирования
 logging.basicConfig(
@@ -24,10 +26,14 @@ logging.basicConfig(
 )
 
 # Загрузка токена из переменных окружения (Railway/Render) или из config.py
-try:
-    from config import BOT_TOKEN
-except ImportError:
-    BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+
+if not BOT_TOKEN:
+    try:
+        from config import BOT_TOKEN as LOCAL_TOKEN
+        BOT_TOKEN = LOCAL_TOKEN
+    except ImportError:
+        pass
 
 if not BOT_TOKEN:
     logging.error("КРИТИЧЕСКАЯ ОШИБКА: Токен бота (BOT_TOKEN) не найден!")
@@ -41,6 +47,15 @@ async def set_commands(bot: Bot):
     await bot.set_my_commands(commands)
 
 async def main():
+    # 1. Инициализируем базу данных (создаем таблицы, если их нет)
+    # Это исправит ошибку "no such table: logs"
+    try:
+        init_db()
+        logging.info("База данных успешно инициализирована (таблицы проверены).")
+    except Exception as e:
+        logging.error(f"Ошибка при инициализации базы данных: {e}")
+        # Не выходим, пробуем запуститься дальше
+
     bot = Bot(
         token=BOT_TOKEN, 
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
