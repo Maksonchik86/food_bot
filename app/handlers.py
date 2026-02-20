@@ -18,7 +18,7 @@ from .utils.database import (
     get_daily_stats,
     get_daily_logs,
     reset_user_data,
-    add_custom_food  # Добавили новую функцию из database.py
+    add_custom_food
 )
 
 # --- СОСТОЯНИЯ ---
@@ -49,7 +49,8 @@ def get_main_kb():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="📊 Статистика за день")],
-            [KeyboardButton(text="🍎 Начать запись приема пищи")]
+            [KeyboardButton(text="🍎 Начать запись приема пищи")],
+            [KeyboardButton(text="➕ Добавить новый продукт")]
         ],
         resize_keyboard=True
     )
@@ -98,7 +99,10 @@ def register_handlers(dp: Dispatcher):
     dp.message.register(cmd_start, CommandStart())
     dp.message.register(cmd_reset, Command("reset"))
     dp.message.register(check_db_content, Command("check"))
-    dp.message.register(cmd_add_food, Command("add_food")) # Новая команда
+    
+    # Добавление продуктов
+    dp.message.register(cmd_add_food, Command("add_food")) 
+    dp.message.register(ask_add_food_instruction, F.text == "➕ Добавить новый продукт")
     
     dp.callback_query.register(cmd_start, F.data == "re_start")
     
@@ -123,12 +127,21 @@ def register_handlers(dp: Dispatcher):
 
 # --- ОБРАБОТЧИКИ ---
 
+async def ask_add_food_instruction(message: types.Message):
+    text = (
+        "📝 <b>Добавление своего продукта</b>\n\n"
+        "Чтобы внести новый продукт в базу, пришлите сообщение в формате:\n"
+        "<code>/add_food Название, Ккал, Белки, Жиры, Углеводы</code>\n\n"
+        "<i>Пример:</i>\n"
+        "<code>/add_food Домашний блин, 180, 5, 7, 25</code>"
+    )
+    await message.answer(text, parse_mode="HTML")
+
 async def cmd_add_food(message: types.Message):
-    """Добавление своего продукта в базу"""
     try:
         raw_text = message.text.replace("/add_food", "").strip()
         if not raw_text:
-            await message.answer("ℹ️ Используй формат: <code>/add_food Название, Ккал, Б, Ж, У</code>", parse_mode="HTML")
+            await ask_add_food_instruction(message)
             return
 
         parts = [p.strip() for p in raw_text.split(",")]
@@ -327,56 +340,22 @@ async def process_activity(message: types.Message, state: FSMContext):
         weight = float(data['weight'])
         height = float(data['height'])
         age = int(data['age'])
-        
-        # --- Расчет нормы калорий (Mifflin-St Jeor) ---
         bmr = (10 * weight) + (6.25 * height) - (5 * age)
         bmr = bmr + 5 if data['gender'] == "Мужчина 👦" else bmr - 161
-        
-        activity_map = {
-            "Минимальный (сидячая работа)": 1.2,
-            "Низкий (1-3 тренировки в неделю)": 1.375,
-            "Средний (3-5 тренировок в неделю)": 1.55,
-            "Высокий (6-7 тренировок в неделю)": 1.725,
-            "Очень высокий (тяжелая работа/спорт)": 1.9
-        }
-        multiplier = activity_map.get(message.text, 1.2)
-        daily_norm = int(bmr * multiplier)
-        
-        # --- Расчет ИМТ (BMI) ---
-        height_m = height / 100  # переводим в метры
+        act_map = {"Минимальный (сидячая работа)": 1.2, "Низкий (1-3 тренировки в неделю)": 1.375,
+                   "Средний (3-5 тренировок в неделю)": 1.55, "Высокий (6-7 тренировок в неделю)": 1.725,
+                   "Очень высокий (тяжелая работа/спорт)": 1.9}
+        daily_norm = int(bmr * act_map.get(message.text, 1.2))
+        height_m = height / 100
         bmi = round(weight / (height_m ** 2), 1)
-        
-        if bmi < 18.5:
-            bmi_status = "ниже нормы (дефицит веса) 🦴"
-        elif 18.5 <= bmi < 25:
-            bmi_status = "в пределах нормы ✅"
-        elif 25 <= bmi < 30:
-            bmi_status = "избыточный (предожирение) ⚠️"
-        else:
-            bmi_status = "высокий (ожирение) 🚨"
-
-        # Сохраняем в базу
-        upsert_user_profile(
-            message.from_user.id, 
-            data['gender'], 
-            age, 
-            height, 
-            weight, 
-            message.text, 
-            daily_norm
-        )
-        
-        res = (
-            f"✅ <b>Профиль настроен!</b>\n\n"
-            f"📊 Ваш ИМТ: <b>{bmi}</b> — {bmi_status}\n"
-            f"🔥 Дневная норма: <b>{daily_norm} ккал</b>\n\n"
-            f"Используйте меню ниже, чтобы записывать еду."
-        )
-        
+        if bmi < 18.5: status = "ниже нормы 🦴"
+        elif 18.5 <= bmi < 25: status = "в норме ✅"
+        elif 25 <= bmi < 30: status = "избыточный ⚠️"
+        else: status = "ожирение 🚨"
+        upsert_user_profile(message.from_user.id, data['gender'], age, height, weight, message.text, daily_norm)
+        res = (f"✅ <b>Профиль настроен!</b>\n\n📊 ИМТ: <b>{bmi}</b> ({status})\n🔥 Норма: <b>{daily_norm} ккал</b>")
         await message.answer(res, reply_markup=get_main_kb(), parse_mode="HTML")
         await state.clear()
-        
     except Exception as e:
-        print(f"Error in process_activity: {e}")
-        await message.answer("Произошла ошибка в расчетах. Попробуйте /start заново.")
+        await message.answer("Ошибка в расчетах. Попробуйте /start.")
         await state.clear()
