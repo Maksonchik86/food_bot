@@ -3,7 +3,8 @@ import os
 import asyncio
 import logging
 
-# Добавляем путь, чтобы Python видел папку app
+# Исправляем пути импорта
+sys.path.append(os.path.join(os.getcwd()))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from aiogram import Bot, Dispatcher
@@ -12,32 +13,25 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import BotCommand
 
-# Импортируем хендлеры и планировщик
+# Импортируем твои модули
 from app.handlers import register_handlers
 from app.utils.scheduler import setup_scheduler
 
-# --- НАСТРОЙКА ЛОГИРОВАНИЯ ---
+# Настройка логирования
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
 )
 
-# --- БЕЗОПАСНОСТЬ И НАСТРОЙКИ ---
-# Теперь бот сначала ищет токен в переменных окружения (для GitHub/Railway),
-# а если не находит — пытается взять из твоего файла config.py
+# Загрузка токена из переменных окружения (Railway/Render) или из config.py
 try:
     from config import BOT_TOKEN
 except ImportError:
     BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 if not BOT_TOKEN:
-    logging.error("Ошибка: Токен бота не найден! Установите переменную BOT_TOKEN.")
+    logging.error("КРИТИЧЕСКАЯ ОШИБКА: Токен бота (BOT_TOKEN) не найден!")
     sys.exit(1)
-
-# Создаем папку data, если её нет (важно для базы данных в облаке)
-if not os.path.exists("data"):
-    os.makedirs("data")
-    logging.info("Папка 'data' создана.")
 
 async def set_commands(bot: Bot):
     commands = [
@@ -56,10 +50,10 @@ async def main():
     # Регистрация хендлеров
     register_handlers(dp)
 
-    # Установка меню команд
+    # Установка команд в меню
     await set_commands(bot)
 
-    # Настройка планировщика
+    # Запуск планировщика
     scheduler = setup_scheduler(bot)
     scheduler.start()
     logging.info("Планировщик напоминаний запущен!")
@@ -67,10 +61,11 @@ async def main():
     logging.info("Бот успешно запущен и готов к работе!")
 
     try:
+        # Сбрасываем старые сообщения, которые пришли, пока бот был выключен
         await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot, allowed_updates=["message", "callback_query"])
     except Exception as e:
-        logging.exception("Ошибка при запуске бота", exc_info=e)
+        logging.exception("Ошибка во время работы бота", exc_info=e)
     finally:
         scheduler.shutdown()
         await bot.session.close()
