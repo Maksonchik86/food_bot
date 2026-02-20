@@ -17,7 +17,8 @@ from .utils.database import (
     log_meal, 
     get_daily_stats,
     get_daily_logs,
-    reset_user_data
+    reset_user_data,
+    add_custom_food  # Добавили новую функцию из database.py
 )
 
 # --- СОСТОЯНИЯ ---
@@ -39,8 +40,6 @@ def get_progress_bar(percent):
     filled_length = int(length * percent / 100)
     display_filled = min(filled_length, length)
     display_empty = max(0, length - display_filled)
-    
-    # Используем гладкие блоки для полоски
     bar = "▬" * display_filled + "▭" * display_empty
     return f"<code>{bar}</code>"
 
@@ -93,14 +92,14 @@ def get_activity_kb():
         one_time_keyboard=True
     )
 
-# --- ЛОГИКА ХЕНДЛЕРОВ ---
+# --- ЛОГИКА РЕГИСТРАЦИИ ХЕНДЛЕРОВ ---
 
 def register_handlers(dp: Dispatcher):
     dp.message.register(cmd_start, CommandStart())
     dp.message.register(cmd_reset, Command("reset"))
     dp.message.register(check_db_content, Command("check"))
+    dp.message.register(cmd_add_food, Command("add_food")) # Новая команда
     
-    # Обработка инлайн-кнопки перезапуска после сброса
     dp.callback_query.register(cmd_start, F.data == "re_start")
     
     dp.message.register(show_daily_stats_handler, F.text == "📊 Статистика за день")
@@ -124,20 +123,44 @@ def register_handlers(dp: Dispatcher):
 
 # --- ОБРАБОТЧИКИ ---
 
+async def cmd_add_food(message: types.Message):
+    """Добавление своего продукта в базу"""
+    try:
+        raw_text = message.text.replace("/add_food", "").strip()
+        if not raw_text:
+            await message.answer("ℹ️ Используй формат: <code>/add_food Название, Ккал, Б, Ж, У</code>", parse_mode="HTML")
+            return
+
+        parts = [p.strip() for p in raw_text.split(",")]
+        if len(parts) != 5:
+            await message.answer("❌ Нужно ввести 5 параметров через запятую!\nПример: <code>/add_food Пицца, 250, 10, 12, 30</code>", parse_mode="HTML")
+            return
+
+        name = parts[0]
+        kcal = float(parts[1].replace(",", "."))
+        p = float(parts[2].replace(",", "."))
+        f = float(parts[3].replace(",", "."))
+        c = float(parts[4].replace(",", "."))
+
+        add_custom_food(name, kcal, p, f, c)
+        await message.answer(f"✅ Продукт <b>{name}</b> добавлен в базу!", parse_mode="HTML")
+    except ValueError:
+        await message.answer("❌ Ошибка: Ккал, Б, Ж, У должны быть числами.")
+    except Exception as e:
+        await message.answer(f"⚠️ Ошибка: {e}")
+
 async def check_db_content(message: types.Message):
     foods = search_foods("а")
     if foods:
         sample = "\n".join([f"🔹 {f['name']} ({f['kcal']} ккал)" for f in foods[:5]])
         await message.answer(f"База найдена! Примеры продуктов:\n{sample}")
     else:
-        await message.answer("⚠️ База пуста. Запустите fresh_db.py")
+        await message.answer("⚠️ База пуста.")
 
 async def cmd_start(message: types.Message | types.CallbackQuery, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
     user = get_user_profile(user_id)
-    
-    # Если это CallbackQuery (нажатие инлайн-кнопки), нам нужно отправить новое сообщение
     is_callback = isinstance(message, types.CallbackQuery)
     target = message.message if is_callback else message
 
@@ -149,7 +172,6 @@ async def cmd_start(message: types.Message | types.CallbackQuery, state: FSMCont
     else:
         await target.answer("👋 Привет! Давай рассчитаем твою норму.\nУкажи свой пол:", reply_markup=get_gender_kb())
         await state.set_state(BotStates.reg_gender)
-    
     if is_callback: await message.answer()
 
 async def cmd_reset(message: types.Message, state: FSMContext):
@@ -167,17 +189,13 @@ async def ask_for_food(message: types.Message):
     await message.answer("Введите название продукта и вес (напр: <i>Курица 200</i>):", 
                          reply_markup=ReplyKeyboardRemove(), parse_mode="HTML")
 
-# --- ЛОГИКА ВЫБОРА ЕДЫ ---
-
 async def start_or_continue_meal(message: types.Message, state: FSMContext):
     name, weight = parse_food_input(message.text)
     if not name: return 
-
     foods = search_foods(name)
     if not foods:
-        await message.reply(f"🤷‍♂️ Продукт «{name}» не найден в базе.")
+        await message.reply(f"🤷‍♂️ Продукт «{name}» не найден.")
         return
-
     if len(foods) == 1:
         food = foods[0]
         await state.update_data(current_food=dict(food))
@@ -186,30 +204,21 @@ async def start_or_continue_meal(message: types.Message, state: FSMContext):
             await message.answer(f"⚖️ Укажите вес для «{food['name']}» (г):")
         else:
             await add_item_to_meal(message, state, food, weight)
-    
     else:
         keyboard = []
         for f in foods:
             btn_text = f"{f['name'][:30]}... ({int(f['kcal'])} ккал)" if len(f['name']) > 30 else f"{f['name']} ({int(f['kcal'])} ккал)"
             cb_data = f"food_id:{f['id']}:{weight if weight else 0}"
             keyboard.append([InlineKeyboardButton(text=btn_text, callback_data=cb_data)])
-        
-        await message.answer("🔍 Найдено несколько вариантов. Выберите нужный:", 
-                             reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
+        await message.answer("🔍 Выберите вариант:", reply_markup=InlineKeyboardMarkup(inline_keyboard=keyboard))
 
 async def process_food_selection(callback: CallbackQuery, state: FSMContext):
     data_parts = callback.data.split(":")
-    food_id = int(data_parts[1])
-    weight = float(data_parts[2])
-
+    food_id, weight = int(data_parts[1]), float(data_parts[2])
     food = get_food_by_id(food_id)
-    if not food:
-        await callback.answer("Продукт не найден.")
-        return
-
+    if not food: return
     await state.update_data(current_food=dict(food))
     await callback.message.edit_text(f"✅ Выбрано: <b>{food['name']}</b>", parse_mode="HTML")
-
     if weight == 0:
         await state.set_state(BotStates.waiting_for_weight)
         await callback.message.answer("⚖️ Введите вес (г):")
@@ -222,27 +231,21 @@ async def process_food_weight(message: types.Message, state: FSMContext):
         weight = float(message.text.replace(',', '.'))
         data = await state.get_data()
         await add_item_to_meal(message, state, data['current_food'], weight)
-    except Exception:
+    except:
         await message.answer("Введите числовое значение веса.")
 
 async def add_item_to_meal(message: types.Message, state: FSMContext, food, weight):
     factor = weight / 100.0
-    item = {
-        'kcal': food['kcal'] * factor, 
-        'prot': food['protein'] * factor,
-        'fat': food['fat'] * factor, 
-        'carb': food['carbs'] * factor,
-        'name': food['name'], 
-        'weight': weight
-    }
+    item = {'kcal': food['kcal'] * factor, 'prot': food['protein'] * factor,
+            'fat': food['fat'] * factor, 'carb': food['carbs'] * factor,
+            'name': food['name'], 'weight': weight}
     data = await state.get_data()
     meal = data.get('meal_list', [])
     meal.append(item)
     await state.update_data(meal_list=meal)
     await state.set_state(BotStates.collecting_meal)
-    
     current_total = sum(x['kcal'] for x in meal)
-    await message.answer(f"➕ Добавлено: {food['name']} ({int(weight)}г)\n💰 Итого в этом приеме: {int(current_total)} ккал", 
+    await message.answer(f"➕ Добавлено: {food['name']} ({int(weight)}г)\n💰 Итого в приеме: {int(current_total)} ккал", 
                          reply_markup=get_meal_kb())
 
 async def ask_next_item(message: types.Message, state: FSMContext):
@@ -255,7 +258,6 @@ async def finish_meal(message: types.Message, state: FSMContext):
         await message.answer("Вы еще ничего не добавили.", reply_markup=get_main_kb())
         await state.clear()
         return
-
     await message.answer("Как назовем этот прием пищи?", reply_markup=get_meal_names_kb())
     await state.set_state(BotStates.waiting_for_meal_name)
 
@@ -263,73 +265,42 @@ async def save_meal_final(message: types.Message, state: FSMContext):
     meal_name = message.text
     data = await state.get_data()
     meal = data.get('meal_list', [])
-    
-    tk = sum(x['kcal'] for x in meal)
-    tp = sum(x['prot'] for x in meal)
-    tf = sum(x['fat'] for x in meal)
-    tc = sum(x['carb'] for x in meal)
-    meal_details = ", ".join([f"{x['name']} ({int(x['weight'])}г)" for x in meal])
-    
-    log_meal(message.from_user.id, tk, tp, tf, tc, meal_details, meal_name)
-
+    tk, tp, tf, tc = sum(x['kcal'] for x in meal), sum(x['prot'] for x in meal), \
+                     sum(x['fat'] for x in meal), sum(x['carb'] for x in meal)
+    details = ", ".join([f"{x['name']} ({int(x['weight'])}г)" for x in meal])
+    log_meal(message.from_user.id, tk, tp, tf, tc, details, meal_name)
     user = get_user_profile(message.from_user.id)
-    stats_today = get_daily_stats(message.from_user.id)
-    
-    total_today = stats_today['total_kcal'] if (stats_today and stats_today['total_kcal']) else tk
+    stats = get_daily_stats(message.from_user.id)
+    total_today = stats['total_kcal'] if (stats and stats['total_kcal']) else tk
     norm = user['daily_norm'] if user else 2000
-    
-    res = f"🍽 <b>{meal_name}</b> записан!\n"
-    res += f"🔥 Всего за прием: {int(tk)} ккал\n"
-    
-    if total_today > norm:
-        res += f"\n⚠️ Превышение нормы на {int(total_today - norm)} ккал!"
-    else:
-        res += f"\n✅ До лимита осталось {int(norm - total_today)} ккал."
-
+    res = f"🍽 <b>{meal_name}</b> записан!\n🔥 Всего за прием: {int(tk)} ккал\n"
+    res += f"\n⚠️ Превышение!" if total_today > norm else f"\n✅ Осталось {int(norm - total_today)} ккал."
     await message.answer(res, parse_mode="HTML", reply_markup=get_main_kb())
     await state.clear()
 
 async def show_daily_stats_handler(message: types.Message):
     user_id = message.from_user.id
-    stats = get_daily_stats(user_id)
-    user = get_user_profile(user_id)
-    logs = get_daily_logs(user_id)
-    
+    stats, user, logs = get_daily_stats(user_id), get_user_profile(user_id), get_daily_logs(user_id)
     if not user:
-        await message.answer("⚠️ Сначала рассчитайте норму калорий через /start")
+        await message.answer("⚠️ Рассчитайте норму через /start")
         return
-
     if not stats or stats['total_kcal'] is None:
-        await message.answer("Статистики пока нет. Запишите первый прием пищи! 🍎")
+        await message.answer("Запишите первый прием пищи! 🍎")
         return
-        
-    norm = user['daily_norm']
-    total_kcal = stats['total_kcal']
+    norm, total_kcal = user['daily_norm'], stats['total_kcal']
     percent = (total_kcal / norm) * 100 if norm > 0 else 0
-    
-    # Собираем сообщение в стиле минимализма
     text = f"📊 <b>СТАТИСТИКА ЗА СЕГОДНЯ</b>\n\n"
-    
-    # Вывод логов без длинных линий
     if logs:
         for log in logs:
-            time_str = log['meal_time']
-            name = log['meal_name']
-            kcal = int(log['kcal'])
-            text += f"🕒 <code>{time_str}</code>  <b>{name}</b>  —  <i>{kcal} ккал</i>\n"
-        text += "\n" # Просто пустая строка для разделения вместо линии
-
-    # Блок БЖУ
-    text += (
-        f"🥩 <b>Белки</b>  —  {int(stats['total_prot'] or 0)}г\n"
-        f"🥑 <b>Жиры</b>  —  {int(stats['total_fat'] or 0)}г\n"
-        f"🍞 <b>Углеводы</b>  —  {int(stats['total_carb'] or 0)}г\n\n"
-        f"🔥 <b>Итог:</b> {int(total_kcal)} / {int(norm)} ккал\n"
-        f"{get_progress_bar(percent)}  <b>{int(percent)}%</b>"
-    )
-
+            text += f"🕒 <code>{log['meal_time']}</code> <b>{log['meal_name']}</b> — <i>{int(log['kcal'])} ккал</i>\n"
+        text += "\n"
+    text += (f"🥩 <b>Б:</b> {int(stats['total_prot'] or 0)}г | "
+             f"🥑 <b>Ж:</b> {int(stats['total_fat'] or 0)}г | "
+             f"🍞 <b>У:</b> {int(stats['total_carb'] or 0)}г\n\n"
+             f"🔥 <b>Итог:</b> {int(total_kcal)} / {int(norm)} ккал\n"
+             f"{get_progress_bar(percent)} <b>{int(percent)}%</b>")
     await message.answer(text, parse_mode="HTML")
-# --- РЕГИСТРАЦИЯ ---
+
 async def process_gender(message: types.Message, state: FSMContext):
     await state.update_data(gender=message.text)
     await message.answer("Введите ваш возраст:")
@@ -357,7 +328,7 @@ async def process_activity(message: types.Message, state: FSMContext):
         height = float(data['height'])
         age = int(data['age'])
         
-        # --- Расчет нормы калорий ---
+        # --- Расчет нормы калорий (Mifflin-St Jeor) ---
         bmr = (10 * weight) + (6.25 * height) - (5 * age)
         bmr = bmr + 5 if data['gender'] == "Мужчина 👦" else bmr - 161
         
@@ -371,7 +342,7 @@ async def process_activity(message: types.Message, state: FSMContext):
         multiplier = activity_map.get(message.text, 1.2)
         daily_norm = int(bmr * multiplier)
         
-        # --- НОВОЕ: Расчет ИМТ ---
+        # --- Расчет ИМТ (BMI) ---
         height_m = height / 100  # переводим в метры
         bmi = round(weight / (height_m ** 2), 1)
         
@@ -384,7 +355,16 @@ async def process_activity(message: types.Message, state: FSMContext):
         else:
             bmi_status = "высокий (ожирение) 🚨"
 
-        upsert_user_profile(message.from_user.id, data['gender'], age, height, weight, message.text, daily_norm)
+        # Сохраняем в базу
+        upsert_user_profile(
+            message.from_user.id, 
+            data['gender'], 
+            age, 
+            height, 
+            weight, 
+            message.text, 
+            daily_norm
+        )
         
         res = (
             f"✅ <b>Профиль настроен!</b>\n\n"
@@ -395,6 +375,8 @@ async def process_activity(message: types.Message, state: FSMContext):
         
         await message.answer(res, reply_markup=get_main_kb(), parse_mode="HTML")
         await state.clear()
-    except Exception:
+        
+    except Exception as e:
+        print(f"Error in process_activity: {e}")
         await message.answer("Произошла ошибка в расчетах. Попробуйте /start заново.")
         await state.clear()

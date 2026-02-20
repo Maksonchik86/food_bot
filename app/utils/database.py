@@ -383,3 +383,14 @@ def reset_user_data(user_id):
     conn.commit()
     conn.close()
     return True
+def add_custom_food(name, kcal, protein, fat, carbs):
+    """Добавляет пользовательский продукт в базу данных"""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        INSERT INTO foods (name, kcal, protein, fat, carbs)
+        VALUES (?, ?, ?, ?, ?)
+    """, (name, kcal, protein, fat, carbs))
+    conn.commit()
+    conn.close()
+    return True
