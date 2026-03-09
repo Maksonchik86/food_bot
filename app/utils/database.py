@@ -390,10 +390,20 @@ def add_custom_food(name, kcal, protein, fat, carbs):
     """Добавляет пользовательский продукт в базу данных"""
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("""
-        INSERT INTO foods (name, kcal, protein, fat, carbs)
-        VALUES (?, ?, ?, ?, ?)
-    """, (name, kcal, protein, fat, carbs))
-    conn.commit()
-    conn.close()
-    return True
+    
+    # Нормализация имени: нижний регистр + убираем лишние пробелы
+    normalized_name = ' '.join(name.lower().split())
+    
+    try:
+        cur.execute("""
+            INSERT INTO foods (name, kcal, protein, fat, carbs)
+            VALUES (?, ?, ?, ?, ?)
+        """, (normalized_name, kcal, protein, fat, carbs))
+        conn.commit()
+        print(f"Добавлен продукт: {normalized_name}")
+        return True
+    except sqlite3.IntegrityError:
+        print(f"Продукт '{normalized_name}' уже существует")
+        return False
+    finally:
+        conn.close()
