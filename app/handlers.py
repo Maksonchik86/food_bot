@@ -146,7 +146,7 @@ async def cmd_add_food(message: types.Message):
 
         parts = [p.strip() for p in raw_text.split(",")]
         if len(parts) != 5:
-            await message.answer("❌ Нужно ввести 5 параметров через запятую!\nПример: <code>/add_food Пицца, 250, 10, 12, 30</code>", parse_mode="HTML")
+            await message.answer("❌ Нужно 5 параметров через запятую!\nПример: <code>/add_food Домашний блин, 180, 5, 7, 25</code>", parse_mode="HTML")
             return
 
         name = parts[0]
@@ -155,8 +155,10 @@ async def cmd_add_food(message: types.Message):
         f = float(parts[3].replace(",", "."))
         c = float(parts[4].replace(",", "."))
 
-        add_custom_food(name, kcal, p, f, c)
-        await message.answer(f"✅ Продукт <b>{name}</b> добавлен в базу!", parse_mode="HTML")
+        if add_custom_food(name, kcal, p, f, c):
+            await message.answer(f"✅ Продукт <b>{name.strip()}</b> добавлен! Теперь можно использовать.", parse_mode="HTML")
+        else:
+            await message.answer(f"Продукт с таким именем уже есть.", parse_mode="HTML")
     except ValueError:
         await message.answer("❌ Ошибка: Ккал, Б, Ж, У должны быть числами.")
     except Exception as e:
