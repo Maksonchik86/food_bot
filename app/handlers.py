@@ -307,28 +307,35 @@ async def show_daily_stats_handler(message: types.Message):
 
     norm = user['daily_norm']
     total_kcal = stats['total_kcal'] or 0
+    total_prot = stats['total_prot'] or 0
+    total_fat = stats['total_fat'] or 0
+    total_carb = stats['total_carb'] or 0
+
     percent = (total_kcal / norm) * 100 if norm > 0 else 0
 
     text = f"📊 <b>СТАТИСТИКА ЗА СЕГОДНЯ</b>\n\n"
 
     if logs:
         for log in logs:
-            what_ate = log['details'] if log['details'] else "—"
+            what_ate = log['details'] if log['details'] else "Продукт не указан"
 
             text += f"🕒 <code>{log['meal_time']}</code> <b>{log['meal_name']}</b>\n"
-            text += f"   {what_ate}\n"                          # ← просто название продуктов
-            text += f"   🔥 {int(log['kcal'])} ккал | 🥩 {log['protein']:.1f} г | 🧈 {log['fat']:.1f} г | 🍞 {log['carbs']:.1f} г\n\n"
+            text += f"   Что съедено: {what_ate}\n"
+            text += f"   🔥 {log['kcal']:.0f} ккал | "
+            text += f"🥩 {log['protein']:.1f} г | "
+            text += f"🧈 {log['fat']:.1f} г | "
+            text += f"🍞 {log['carbs']:.1f} г\n\n"
 
         text += "────────────────────────────\n"
 
-    text += f"🥩 <b>Б:</b> {int(stats['total_prot'] or 0)} г | "
-    text += f"🥑 <b>Ж:</b> {int(stats['total_fat'] or 0)} г | "
-    text += f"🍞 <b>У:</b> {int(stats['total_carb'] or 0)} г\n\n"
-    text += f"🔥 <b>Итог:</b> {int(total_kcal)} / {int(norm)} ккал\n"
-    text += f"{get_progress_bar(percent)} <b>{int(percent)}%</b>"
+    # Итог дня — используем точные суммы из stats, без повторного округления
+    text += f"🥩 <b>Б:</b> {total_prot:.1f} г | "
+    text += f"🥑 <b>Ж:</b> {total_fat:.1f} г | "
+    text += f"🍞 <b>У:</b> {total_carb:.1f} г\n\n"
+    text += f"🔥 <b>Итог:</b> {total_kcal:.0f} / {norm:.0f} ккал\n"
+    text += f"{get_progress_bar(percent)} <b>{percent:.0f}%</b>"
 
     await message.answer(text, parse_mode="HTML")
-
 async def process_gender(message: types.Message, state: FSMContext):
     await state.update_data(gender=message.text)
     await message.answer("Введите ваш возраст:")
