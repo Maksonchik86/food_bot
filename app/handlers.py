@@ -295,7 +295,7 @@ async def show_daily_stats_handler(message: types.Message):
     user_id = message.from_user.id
     stats = get_daily_stats(user_id)
     user = get_user_profile(user_id)
-    logs = get_daily_logs(user_id)  # ← твоя функция возвращает все записи за день
+    logs = get_daily_logs(user_id)
 
     if not user:
         await message.answer("⚠️ Рассчитайте норму через /start")
@@ -311,19 +311,16 @@ async def show_daily_stats_handler(message: types.Message):
 
     text = f"📊 <b>СТАТИСТИКА ЗА СЕГОДНЯ</b>\n\n"
 
-    # Если есть записи — показываем каждый приём пищи подробно
     if logs:
         for log in logs:
-            # log['details'] содержит строку вида "Куриная грудка — 200 г, Гречка — 150 г"
-            what_ate = log['details'] if log['details'] else "Продукты не указаны"
+            what_ate = log['details'] if log['details'] else "—"
 
             text += f"🕒 <code>{log['meal_time']}</code> <b>{log['meal_name']}</b>\n"
-            text += f"   Что съедено: {what_ate}\n"  # ← главное изменение!
+            text += f"   {what_ate}\n"                          # ← просто название продуктов
             text += f"   🔥 {int(log['kcal'])} ккал | 🥩 {log['protein']:.1f} г | 🧈 {log['fat']:.1f} г | 🍞 {log['carbs']:.1f} г\n\n"
 
         text += "────────────────────────────\n"
 
-    # Итог дня
     text += f"🥩 <b>Б:</b> {int(stats['total_prot'] or 0)} г | "
     text += f"🥑 <b>Ж:</b> {int(stats['total_fat'] or 0)} г | "
     text += f"🍞 <b>У:</b> {int(stats['total_carb'] or 0)} г\n\n"
